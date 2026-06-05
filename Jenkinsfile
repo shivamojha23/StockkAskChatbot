@@ -155,11 +155,14 @@ pipeline {
                 // Deploy Backend: Run the container using our production settings from the Dockerfile (no reload crash!)
                 bat "docker run -d --name stockkbot-api -p 8000:8000 --env-file backend\\.env ${DOCKER_IMAGE}:${DOCKER_TAG}"
                 
-                // Convert backslashes in workspace path to forward slashes for Docker volume mounting compatibility on Windows
-                def cleanWorkspace = WORKSPACE.replace('\\', '/')
-                
-                // Deploy Frontend: Start Nginx web server to serve the HTML pages
-                bat "docker run -d --name stockkbot-frontend -p 3000:80 -v \"${cleanWorkspace}/frontend:/usr/share/nginx/html\" nginx:alpine"
+                // We wrap raw Groovy code in a 'script' block so the declarative pipeline can compile it.
+                script {
+                    // Convert backslashes in workspace path to forward slashes for Docker volume mounting compatibility on Windows
+                    def cleanWorkspace = WORKSPACE.replace('\\', '/')
+                    
+                    // Deploy Frontend: Start Nginx web server to serve the HTML pages
+                    bat "docker run -d --name stockkbot-frontend -p 3000:80 -v \"${cleanWorkspace}/frontend:/usr/share/nginx/html\" nginx:alpine"
+                }
                 
                 echo 'Local server deployed successfully! Access the web UI at http://localhost:3000/demo.html'
             }
