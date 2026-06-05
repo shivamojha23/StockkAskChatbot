@@ -60,14 +60,13 @@ pipeline {
                 echo 'Running Python syntax checks and security scan...'
                 
                 // 1. Lint check: Validate Python syntax errors (fails build if syntax is broken).
-                //    We use 'sh' to execute shell commands.
-                sh 'python -m pip install flake8 bandit || echo "Install fallback"'
-                sh 'python -m flake8 backend/ --count --select=E9,F63,F7,F82 --show-source --statistics || true'
+                //    We use 'bat' to execute Windows command prompt commands.
+                bat 'python -m pip install flake8 bandit || echo Install fallback'
+                bat 'python -m flake8 backend/ --count --select=E9,F63,F7,F82 --show-source --statistics || exit 0'
                 
                 // 2. Bandit scan: Bandit is a tool designed to find common security issues in Python.
                 //    '-r' scans recursively, '-x' excludes folders like virtualenvs.
-                //    We use '|| true' or handle it so warning issues don't block the build immediately.
-                sh 'python -m bandit -r backend/ -ll || true'
+                bat 'python -m bandit -r backend/ -ll || exit 0'
             }
         }
 
@@ -82,7 +81,7 @@ pipeline {
                 
                 // Build the Docker image from our backend context.
                 // We tag it with the Jenkins build number for absolute version tracking.
-                sh "docker build -t ${DOCKER_IMAGE}:${DOCKER_TAG} ./backend"
+                bat "docker build -t ${DOCKER_IMAGE}:${DOCKER_TAG} ./backend"
             }
         }
 
@@ -110,19 +109,10 @@ pipeline {
                     string(credentialsId: 'pinecone-api-key', variable: 'PINECONE_API_KEY')
                 ]) {
                     // To run the tests, we run a temporary Docker container from our built image.
-                    // 1. We copy/mount the root-level 'tests' directory into the container.
-                    // 2. We pass the API keys securely via environment variables (-e).
-                    // 3. We run the Python unittest module.
-                    // 4. The container is automatically deleted (--rm) when finished.
-                    sh """
-                        docker run --rm \
-                          -v "\$(pwd)/tests:/app/tests" \
-                          -e OPENAI_API_KEY="${OPENAI_API_KEY}" \
-                          -e GROQ_API_KEY="${GROQ_API_KEY}" \
-                          -e PINECONE_API_KEY="${PINECONE_API_KEY}" \
-                          -e APP_ENV="${APP_ENV}" \
-                          ${DOCKER_IMAGE}:${DOCKER_TAG} \
-                          python -m unittest discover -s tests -p "test_*.py"
+                    // We mount the workspace 'tests' directory into the container using ${WORKSPACE}.
+                    // We pass the API keys securely via environment variables (-e).
+                    bat """
+                        docker run --rm -v "${WORKSPACE}/tests:/app/tests" -e OPENAI_API_KEY="${OPENAI_API_KEY}" -e GROQ_API_KEY="${GROQ_API_KEY}" -e PINECONE_API_KEY="${PINECONE_API_KEY}" -e APP_ENV="${APP_ENV}" ${DOCKER_IMAGE}:${DOCKER_TAG} python -m unittest discover -s tests -p "test_*.py"
                     """
                 }
             }
