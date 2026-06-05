@@ -173,14 +173,15 @@ pipeline {
     // This is perfect for notifications (email, Slack, Microsoft Teams).
     post {
         always {
-            // Clean up workspace so we don't clog up Jenkins hard drives.
-            cleanWs()
+            echo 'Pipeline finished execution.'
         }
         success {
             echo "Pipeline passed successfully! StockkAsk is safe, SEBI-compliant, and deployed."
         }
         failure {
             echo "Pipeline FAILED! Check logs above to identify which step (Lint, Build, or Test) failed."
+            // Clean up workspace on failure to save space
+            cleanWs()
         }
     }
 }
