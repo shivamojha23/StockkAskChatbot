@@ -1,0 +1,115 @@
+# ==============================================================================
+# StockkAsk Git Exclusion Configuration (.gitignore)
+# ==============================================================================
+# WHAT IS THIS FILE?
+# When you track your project with Git, by default Git wants to track every single 
+# file in this directory. A ".gitignore" file tells Git: "Ignore these specific 
+# files and directories. Never upload them to my online repository (like GitHub)."
+#
+# WHY DO WE NEED IT FOR SECURITY?
+# In modern development, we keep API keys, passwords, and private tokens inside a 
+# file named ".env" (environment secrets). If you upload ".env" to GitHub, malicious 
+# bots will find it within minutes, steal your keys (OpenAI, Pinecone), run up massive 
+# bills, and access your database. This file acts as our primary shield against leaks.
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# 1. ENVIRONMENT & SENSITIVE SECRETS (CRITICAL SECURITY)
+# ------------------------------------------------------------------------------
+# We exclude all files containing environmental secrets and local configurations.
+# Never, under any circumstance, remove these lines.
+.env
+.env.local
+.env.development
+.env.production
+.env.staging
+.env*.local
+*.env
+
+# ------------------------------------------------------------------------------
+# 2. PYTHON VIRTUAL ENVIRONMENTS
+# ------------------------------------------------------------------------------
+# Virtual environments contain the actual Python executable and libraries installed
+# via pip. They contain thousands of files and are very large (hundreds of MBs).
+# We do not track them because they can be easily re-created using 'requirements.txt'.
+venv/
+.venv/
+env/
+ENV/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# ------------------------------------------------------------------------------
+# 3. PYTHON CACHE AND COMPILED BYTECODE
+# ------------------------------------------------------------------------------
+# Python automatically compiles your source code (.py files) into optimized bytecode 
+# (.pyc files) so it runs faster next time. This is machine-generated code and changes 
+# constantly. We only want to track our human-written source code.
+**/__pycache__/
+*.py[cod]
+*$py.class
+
+# ------------------------------------------------------------------------------
+# 4. TESTING AND COVERAGE REPORTING
+# ------------------------------------------------------------------------------
+# When you run tests, testing frameworks generate logs, cache folders, and coverage reports.
+# These are generated dynamically at runtime, so we ignore them.
+.pytest_cache/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+htmlcov/
+nosetests.xml
+coverage.xml
+*.cover
+*.log
+
+# ------------------------------------------------------------------------------
+# 5. INTEGRATED DEVELOPMENT ENVIRONMENT (IDE) & EDITOR SETTINGS
+# ------------------------------------------------------------------------------
+# Different developers use different editors (VS Code, PyCharm, Sublime). Editors 
+# create local configuration folders (like Workspace settings). We keep these local 
+# because they shouldn't overwrite other developers' preferences.
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.swp
+*.swo
+
+# ------------------------------------------------------------------------------
+# 6. OPERATING SYSTEM JUNKS
+# ------------------------------------------------------------------------------
+# OS-specific files created by Windows (Thumbs.db) or macOS (.DS_Store) for folder
+# thumbnail settings. They are irrelevant to our application code.
+.DS_Store
+.DS_Store?
+ehthumbs.db
+Thumbs.db
+[Dd]esktop.ini
+
+# ------------------------------------------------------------------------------
+# 7. BUILD ARTIFACTS AND DISTRIBUTION
+# ------------------------------------------------------------------------------
+# Files created when packaging Python projects or building binaries.
+develop-eggs/
+downloads/
+eggs/
+build/
+dist/
+downloads/
+/*.zip
+/*.tar.gz
