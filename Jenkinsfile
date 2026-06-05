@@ -136,8 +136,13 @@ pipeline {
                         echo OPENAI_API_KEY=${OPENAI_API_KEY}>> backend\\.env
                         echo GROQ_API_KEY=${GROQ_API_KEY}>> backend\\.env
                         echo PINECONE_API_KEY=${PINECONE_API_KEY}>> backend\\.env
+                        echo LLM_PROVIDER=groq>> backend\\.env
+                        echo EMBEDDING_PROVIDER=fastembed>> backend\\.env
+                        echo VECTOR_DB=pinecone>> backend\\.env
+                        echo PINECONE_INDEX_NAME=stockkask-faq>> backend\\.env
+                        echo PINECONE_ENVIRONMENT=us-east-1>> backend\\.env
                         echo APP_ENV=production>> backend\\.env
-                        echo ALLOWED_ORIGINS=https://stockk.trade,http://localhost:3000,http://localhost:8000>> backend\\.env
+                        echo ALLOWED_ORIGINS=https://stockk.trade,http://localhost:3000,http://127.0.0.1:3000,http://localhost:8000>> backend\\.env
                         echo LOG_LEVEL=INFO>> backend\\.env
                         echo RATE_LIMIT_PER_MINUTE=20>> backend\\.env
                         echo RATE_LIMIT_PER_DAY=500>> backend\\.env
