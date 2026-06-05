@@ -135,7 +135,7 @@ def _parse_html_to_chunks(url: str, html: str) -> list[KnowledgeEntry]:
             continue
 
         # Generate a deterministic ID from the URL + title
-        chunk_id = "crawl-" + hashlib.md5(f"{url}::{title_text}".encode()).hexdigest()[:12]
+        chunk_id = "crawl-" + hashlib.md5(f"{url}::{title_text}".encode()).hexdigest()[:12]  # nosec B324
 
         chunks.append({
             "id": chunk_id,
