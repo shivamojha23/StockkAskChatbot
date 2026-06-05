@@ -55,18 +55,13 @@ pipeline {
         // ----------------------------------------------------------------------
         // Before running the application, we check the code quality (Linting) 
         // and scan for vulnerabilities or accidentally committed secrets (like API keys).
+        // To avoid needing Python installed on the host, we run the tools in a temporary container.
         stage('Security Scanning & Linting') {
             steps {
-                echo 'Running Python syntax checks and security scan...'
+                echo 'Running Python syntax checks and security scan in Docker...'
                 
-                // 1. Lint check: Validate Python syntax errors (fails build if syntax is broken).
-                //    We use 'bat' to execute Windows command prompt commands.
-                bat 'python -m pip install flake8 bandit || echo Install fallback'
-                bat 'python -m flake8 backend/ --count --select=E9,F63,F7,F82 --show-source --statistics || exit 0'
-                
-                // 2. Bandit scan: Bandit is a tool designed to find common security issues in Python.
-                //    '-r' scans recursively, '-x' excludes folders like virtualenvs.
-                bat 'python -m bandit -r backend/ -ll || exit 0'
+                // Run a temporary Python container, mount the workspace, and execute flake8 and bandit.
+                bat 'docker run --rm -v "%WORKSPACE%:/app" python:3.12-slim sh -c "pip install --no-cache-dir flake8 bandit && flake8 /app/backend/ --count --select=E9,F63,F7,F82 --show-source --statistics && bandit -r /app/backend/ -ll"'
             }
         }
 
