@@ -148,8 +148,15 @@ pipeline {
                     """
                 }
                 
-                // Stop any previously running compose instances and launch the new build in the background (-d).
-                bat 'docker-compose down && docker-compose up -d --build'
+                // Stop and remove old backend and frontend containers if they are running
+                bat 'docker stop stockkbot-api stockkbot-frontend || exit 0'
+                bat 'docker rm stockkbot-api stockkbot-frontend || exit 0'
+                
+                // Deploy Backend: Run the container using our production settings from the Dockerfile (no reload crash!)
+                bat "docker run -d --name stockkbot-api -p 8000:8000 --env-file backend\\.env ${DOCKER_IMAGE}:${DOCKER_TAG}"
+                
+                // Deploy Frontend: Start Nginx web server to serve the HTML pages
+                bat 'docker run -d --name stockkbot-frontend -p 3000:80 -v "%WORKSPACE%/frontend:/usr/share/nginx/html" nginx:alpine'
                 
                 echo 'Local server deployed successfully! Access the web UI at http://localhost:3000/demo.html'
             }
