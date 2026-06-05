@@ -141,8 +141,8 @@ pipeline {
                         echo LOG_LEVEL=INFO>> backend\\.env
                         echo RATE_LIMIT_PER_MINUTE=20>> backend\\.env
                         echo RATE_LIMIT_PER_DAY=500>> backend\\.env
-                        echo EMBEDDING_MODEL=text-embedding-3-small>> backend\\.env
-                        echo CHAT_MODEL=gpt-4o-mini>> backend\\.env
+                        echo EMBEDDING_MODEL=BAAI/bge-small-en-v1.5>> backend\\.env
+                        echo CHAT_MODEL=llama-3.1-8b-instant>> backend\\.env
                         echo TOP_K_RESULTS=5>> backend\\.env
                         echo MAX_CONTEXT_TOKENS=2000>> backend\\.env
                     """
