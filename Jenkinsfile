@@ -102,10 +102,11 @@ pipeline {
             steps {
                 echo 'Running automated SEBI Compliance and Security Injection tests...'
                 
-                // Retrieve the OpenAI/Groq API keys securely from Jenkins credentials
+                // Retrieve the OpenAI, Groq, or Pinecone API keys securely from Jenkins credentials
                 // and inject them as environment variables during test execution.
                 withCredentials([
                     string(credentialsId: 'openai-api-key', variable: 'OPENAI_API_KEY'),
+                    string(credentialsId: 'groq-api-key', variable: 'GROQ_API_KEY'),
                     string(credentialsId: 'pinecone-api-key', variable: 'PINECONE_API_KEY')
                 ]) {
                     // To run the tests, we run a temporary Docker container from our built image.
@@ -117,6 +118,7 @@ pipeline {
                         docker run --rm \
                           -v "\$(pwd)/tests:/app/tests" \
                           -e OPENAI_API_KEY="${OPENAI_API_KEY}" \
+                          -e GROQ_API_KEY="${GROQ_API_KEY}" \
                           -e PINECONE_API_KEY="${PINECONE_API_KEY}" \
                           -e APP_ENV="${APP_ENV}" \
                           ${DOCKER_IMAGE}:${DOCKER_TAG} \
