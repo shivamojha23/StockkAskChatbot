@@ -508,7 +508,14 @@
     connectedCallback() {
       // Read config from dataset attributes
       const ds = this.dataset;
-      if (ds.apiUrl)       this._config.apiUrl       = ds.apiUrl;
+      if (ds.apiUrl) {
+        this._config.apiUrl = ds.apiUrl;
+      } else {
+        // Automatically determine the backend API URL on port 8000 using the current page's hostname
+        const host = window.location.hostname || 'localhost';
+        const protocol = window.location.protocol === 'file:' ? 'http:' : window.location.protocol;
+        this._config.apiUrl = `${protocol}//${host}:8000`;
+      }
       if (ds.theme)        this._config.theme         = ds.theme;
       if (ds.position)     this._config.position      = ds.position;
       if (ds.primaryColor) this._config.primaryColor  = ds.primaryColor;

@@ -48,11 +48,10 @@
 
   <!--
     Embed the chatbot widget.
-    In production, replace data-api-url with your deployed FastAPI URL.
+    The script will dynamically find the backend API on port 8000 based on your current network IP/host.
   -->
   <script
     src="chatbot-widget.js"
-    data-api-url="http://20.2.1.169:8000"
     data-theme="dark"
     data-position="bottom-right"
     defer

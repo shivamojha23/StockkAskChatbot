@@ -87,9 +87,11 @@ app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # --- CORS ---
+# Support local development subnets dynamically (localhost, 127.0.0.1, 192.168.x.x, 10.x.x.x, 172.16-31.x.x, 20.x.x.x)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
+    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|20\.\d+\.\d+\.\d+)(:\d+)?",
     allow_credentials=True,
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["Content-Type", "X-Session-ID"],
