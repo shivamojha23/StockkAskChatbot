@@ -348,6 +348,13 @@
         word-break: break-word;
         position: relative;
       }
+      .bubble ul, .bubble ol {
+        margin: 6px 0;
+        padding-left: 18px;
+      }
+      .bubble li {
+        margin: 4px 0;
+      }
       .bubble-row.user .bubble {
         background: ${primary};
         color: #fff;
@@ -777,16 +784,52 @@
     _parseSafeHtml(text) {
       if (!text) return '';
       // 1. Escape HTML special characters to prevent XSS
-      const escaped = text
+      let html = text
         .replace(/&/g, '&amp;')
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#039;');
 
-      // 2. Parse valid HTTP/HTTPS URLs and format them as safe clickable links
+      // 2. Parse Markdown Bold (**text**)
+      html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+
+      // 3. Parse Markdown Italic (*text* or _text_)
+      html = html.replace(/\*(.*?)\*/g, '<em>$1</em>');
+      html = html.replace(/_(.*?)_/g, '<em>$1</em>');
+
+      // 4. Parse Lists (e.g., bullet points)
+      // Convert lines starting with "- " or "* " to <li> items
+      const lines = html.split('\n');
+      let inList = false;
+      const parsedLines = lines.map(line => {
+        const trimmed = line.trim();
+        if (trimmed.startsWith('- ') || trimmed.startsWith('* ')) {
+          const content = trimmed.substring(2);
+          if (!inList) {
+            inList = true;
+            return `<ul><li>${content}</li>`;
+          }
+          return `<li>${content}</li>`;
+        } else {
+          if (inList) {
+            inList = false;
+            return `</ul>${line}`;
+          }
+          return line;
+        }
+      });
+      if (inList) {
+        parsedLines.push('</ul>');
+      }
+      html = parsedLines.join('\n');
+
+      // 5. Parse Newlines to <br> (only if not inside list tags to avoid double spacing)
+      html = html.replace(/\n/g, '<br />');
+
+      // 6. Parse valid HTTP/HTTPS URLs and format them as safe clickable links
       const urlRegex = /(https?:\/\/[^\s\)]+)/g;
-      return escaped.replace(urlRegex, (url) => {
+      return html.replace(urlRegex, (url) => {
         return `<a href="${url}" target="_blank" rel="noopener noreferrer" style="color: inherit; text-decoration: underline;">${url}</a>`;
       });
     }
