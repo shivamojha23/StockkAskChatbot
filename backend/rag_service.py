@@ -275,6 +275,39 @@ class RAGService:
                 )
                 raise exc
 
+        # Log rate limit usage if available (backend-only, not visible to frontend)
+        try:
+            if hasattr(stream, "response") and hasattr(stream.response, "headers"):
+                headers = stream.response.headers
+                limit_req = headers.get("x-ratelimit-limit-requests")
+                rem_req = headers.get("x-ratelimit-remaining-requests")
+                reset_req = headers.get("x-ratelimit-reset-requests")
+                
+                limit_tok = headers.get("x-ratelimit-limit-tokens")
+                rem_tok = headers.get("x-ratelimit-remaining-tokens")
+                reset_tok = headers.get("x-ratelimit-reset-tokens")
+                
+                if rem_req or rem_tok:
+                    log_msg = f"API Key Index {self._current_client_idx} Rate Limits:"
+                    
+                    if limit_req and rem_req:
+                        try:
+                            used_req = int(limit_req) - int(rem_req)
+                            log_msg += f" Requests: {rem_req} remaining / {limit_req} limit ({used_req} used, resets in {reset_req})"
+                        except ValueError:
+                            log_msg += f" Requests: {rem_req}/{limit_req} remaining (resets in {reset_req})"
+                            
+                    if limit_tok and rem_tok:
+                        try:
+                            used_tok = int(limit_tok) - int(rem_tok)
+                            log_msg += f" Tokens: {rem_tok} remaining / {limit_tok} limit ({used_tok} used, resets in {reset_tok})"
+                        except ValueError:
+                            log_msg += f" Tokens: {rem_tok}/{limit_tok} remaining (resets in {reset_tok})"
+                            
+                    logger.info(log_msg)
+        except Exception as e:
+            logger.debug("Could not retrieve API rate limit headers: %s", e)
+
         try:
             async for chunk in stream:
                 delta = chunk.choices[0].delta
