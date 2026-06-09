@@ -199,6 +199,81 @@ class TestStockkAskCompliance(unittest.IsolatedAsyncioTestCase):
         violations_safe = check_compliance_violation(safe_response)
         self.assertEqual(len(violations_safe), 0)
 
+    @patch('rag_service.get_settings')
+    @patch('rag_service.get_embedding_service')
+    @patch('rag_service.get_vector_store')
+    async def test_multi_key_rotation_under_rate_limit(self, mock_get_store, mock_get_embed, mock_get_settings):
+        """
+        Test that RAGService handles RateLimitError by rotating to the next key
+        and only raises the error if all keys are exhausted.
+        """
+        # Configure settings with two keys
+        self.test_settings.groq_api_key = "key-1,key-2"
+        self.test_settings.llm_provider = "groq"
+        mock_get_settings.return_value = self.test_settings
+        mock_get_embed.return_value.embed_single = AsyncMock(return_value=[0.1]*1536)
+        mock_get_store.return_value.query = AsyncMock(return_value=self.mock_db_results)
+        
+        from rag_service import RAGService
+        from openai import RateLimitError
+        
+        # Instantiate service (will create two clients internally)
+        rag_svc = RAGService()
+        self.assertEqual(len(rag_svc._clients), 2)
+        
+        # Define a mock stream chunk for a successful call
+        mock_chunk = MagicMock()
+        mock_chunk.choices = [MagicMock()]
+        mock_chunk.choices[0].delta.content = "Answer content"
+        
+        # Setup mock behavior:
+        # Client 0 (index 0) raises RateLimitError
+        # Client 1 (index 1) succeeds
+        mock_response = MagicMock()
+        mock_response.__aiter__.return_value = [mock_chunk]
+        
+        # We need an HTTP response object to instantiate RateLimitError
+        mock_http_response = MagicMock()
+        mock_http_response.status_code = 429
+        mock_http_response.headers = {}
+        
+        # Set up side effects
+        rag_svc._clients[0].chat.completions.create = AsyncMock(
+            side_effect=RateLimitError("Rate limit exceeded", response=mock_http_response, body=None)
+        )
+        rag_svc._clients[1].chat.completions.create = AsyncMock(
+            return_value=mock_response
+        )
+        
+        # Trigger stream generation
+        tokens = []
+        async for token in rag_svc.generate_stream("What is StockkAsk?", []):
+            tokens.append(token)
+            
+        # Assert that client index 0 was called and failed
+        rag_svc._clients[0].chat.completions.create.assert_called_once()
+        # Assert that client index 1 was called and succeeded
+        rag_svc._clients[1].chat.completions.create.assert_called_once()
+        # Assert that current client index rotated to 1
+        self.assertEqual(rag_svc._current_client_idx, 1)
+        # Verify tokens
+        self.assertIn("Answer content", tokens)
+
+        # Test case 2: All keys hit rate limit
+        rag_svc._clients[0].chat.completions.create = AsyncMock(
+            side_effect=RateLimitError("Rate limit exceeded key 1", response=mock_http_response, body=None)
+        )
+        rag_svc._clients[1].chat.completions.create = AsyncMock(
+            side_effect=RateLimitError("Rate limit exceeded key 2", response=mock_http_response, body=None)
+        )
+        
+        # Since index is currently 1:
+        # attempt 1: client 1 fails, rotates to 0
+        # attempt 2: client 0 fails, raises RateLimitError
+        with self.assertRaises(RateLimitError):
+            async for _ in rag_svc.generate_stream("What is StockkAsk?", []):
+                pass
+
 
 if __name__ == '__main__':
     unittest.main()

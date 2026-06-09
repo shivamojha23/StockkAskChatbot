@@ -22,7 +22,7 @@ import logging
 from typing import AsyncGenerator
 
 import tiktoken
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI, RateLimitError
 
 from config import get_settings
 from embeddings import get_embedding_service
@@ -99,18 +99,39 @@ class RAGService:
         settings = get_settings()
         self._settings = settings
         
+        self._clients: list[AsyncOpenAI] = []
         if settings.llm_provider == "groq":
-            self._openai = AsyncOpenAI(
-                api_key=settings.groq_api_key,
-                base_url="https://api.groq.com/openai/v1",
-            )
+            keys = [k.strip() for k in settings.groq_api_key.split(",") if k.strip()]
+            if not keys:
+                raise ValueError("No Groq API keys configured in GROQ_API_KEY.")
+            self._clients = [
+                AsyncOpenAI(api_key=key, base_url="https://api.groq.com/openai/v1")
+                for key in keys
+            ]
         else:
-            self._openai = AsyncOpenAI(api_key=settings.openai_api_key)
+            keys = [k.strip() for k in settings.openai_api_key.split(",") if k.strip()]
+            if not keys:
+                raise ValueError("No OpenAI API keys configured in OPENAI_API_KEY.")
+            self._clients = [
+                AsyncOpenAI(api_key=key)
+                for key in keys
+            ]
             
+        self._current_client_idx = 0
         self._embed_svc = get_embedding_service()
         self._vector_store = get_vector_store()
         self._encoder = tiktoken.get_encoding("cl100k_base")
-        logger.info("RAGService initialised (provider=%s, model=%s).", settings.llm_provider, settings.chat_model)
+        logger.info(
+            "RAGService initialised (provider=%s, model=%s, keys_count=%d).",
+            settings.llm_provider,
+            settings.chat_model,
+            len(self._clients),
+        )
+
+    @property
+    def _openai(self) -> AsyncOpenAI:
+        """Backward compatible reference to the active/first client for testing mocks."""
+        return self._clients[self._current_client_idx] if self._clients else None
 
     # ------------------------------------------------------------------
     # Retrieval
@@ -218,22 +239,49 @@ class RAGService:
             len(trimmed_history) // 2,
         )
 
+        # Try to establish the stream using the available clients (with rotation failover on RateLimitError)
+        stream = None
+        attempts = len(self._clients)
+        
+        for attempt in range(attempts):
+            client = self._clients[self._current_client_idx]
+            try:
+                stream = await client.chat.completions.create(
+                    model=self._settings.chat_model,
+                    messages=messages,  # type: ignore[arg-type]
+                    stream=True,
+                    temperature=0.3,      # Low temp for factual accuracy
+                    max_tokens=600,       # Platform guide answers should be concise
+                    presence_penalty=0.1,
+                    timeout=30.0,         # Prevent hung connections by enforcing a 30s timeout
+                )
+                break
+            except RateLimitError as exc:
+                logger.warning(
+                    "Rate limit hit on client key index %d (attempt %d/%d). Rotating to next key...",
+                    self._current_client_idx,
+                    attempt + 1,
+                    attempts,
+                )
+                self._current_client_idx = (self._current_client_idx + 1) % len(self._clients)
+                if attempt == attempts - 1:
+                    # If all clients have been tried and failed, raise the error
+                    raise exc
+            except Exception as exc:
+                logger.error(
+                    "Error creating stream on client key index %d: %s",
+                    self._current_client_idx,
+                    exc,
+                )
+                raise exc
+
         try:
-            stream = await self._openai.chat.completions.create(
-                model=self._settings.chat_model,
-                messages=messages,  # type: ignore[arg-type]
-                stream=True,
-                temperature=0.3,      # Low temp for factual accuracy
-                max_tokens=600,       # Platform guide answers should be concise
-                presence_penalty=0.1,
-                timeout=30.0,         # Prevent hung connections by enforcing a 30s timeout
-            )
             async for chunk in stream:
                 delta = chunk.choices[0].delta
                 if delta.content:
                     yield delta.content
         except Exception as exc:
-            logger.error("LLM streaming error: %s", exc)
+            logger.error("LLM streaming error during chunk generation: %s", exc)
             yield "\n\n⚠️ Sorry, I encountered an error. Please try again shortly."
 
     # ------------------------------------------------------------------
