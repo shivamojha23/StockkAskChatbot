@@ -42,6 +42,11 @@ from rag_service import get_rag_service
 # Logging
 # ---------------------------------------------------------------------------
 
+import logging
+
+# Configure Python standard logging root logger level to show INFO logs
+logging.basicConfig(level=logging.INFO)
+
 structlog.configure(
     processors=[
         structlog.processors.TimeStamper(fmt="iso"),
