@@ -36,6 +36,7 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
 from config import get_settings
+from guardrails import run_input_guardrails
 from rag_service import get_rag_service
 
 # ---------------------------------------------------------------------------
@@ -210,7 +211,7 @@ async def sse_event_generator(
     full_response: list[str] = []
 
     try:
-        async for token in rag.generate_stream(message, history):
+        async for token in rag.generate_stream(message, history, session_id=session_id):
             if await request.is_disconnected():
                 logger.info("Client disconnected mid-stream.", session_id=session_id)
                 break
@@ -267,10 +268,13 @@ async def chat(
     body: ChatRequest,
 ) -> StreamingResponse:
     """
-    Main RAG chatbot endpoint.
+    Main RAG chatbot endpoint with input guardrails.
 
     Accepts a user message + optional conversation history.
     Returns a Server-Sent Events stream of LLM tokens.
+
+    Input guardrails run before the LLM call to block prompt injection,
+    toxicity, off-topic requests, and redact PII.
 
     Rate limited to {rate_limit_per_minute} requests/IP/minute.
     """
@@ -281,6 +285,29 @@ async def chat(
         history_length=len(body.history),
     )
 
+    # ── INPUT GUARDRAILS ─────────────────────────────────
+    input_result = run_input_guardrails(body.message, body.session_id)
+
+    if not input_result.passed:
+        # Stream the safe response as SSE for frontend compatibility
+        async def blocked_stream():
+            payload = json.dumps({"token": input_result.safe_response, "session_id": body.session_id})
+            yield f"data: {payload}\n\n"
+            yield "data: [DONE]\n\n"
+
+        return StreamingResponse(
+            blocked_stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+                "Connection": "keep-alive",
+            },
+        )
+
+    # Use the PII-redacted version of the message for downstream processing
+    clean_message = input_result.redacted_content or body.message
+
     # Convert Pydantic models to plain dicts for the RAG service
     history_dicts = [{"role": m.role, "content": m.content} for m in body.history]
 
@@ -288,7 +315,7 @@ async def chat(
         sse_event_generator(
             request=request,
             session_id=body.session_id,
-            message=body.message,
+            message=clean_message,
             history=history_dicts,
         ),
         media_type="text/event-stream",
