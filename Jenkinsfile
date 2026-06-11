@@ -27,7 +27,7 @@ pipeline {
     // in the pipeline (like global variables in Python).
     environment {
         // Expose Docker host via TCP since Jenkins runs as LocalSystem and cannot access the user-level named pipe directly
-        DOCKER_HOST    = "tcp://localhost:2375"
+        DOCKER_HOST    = "tcp://127.0.0.1:2375"
         
         // Name of our Docker image. We use the Jenkins build number to make it unique.
         DOCKER_IMAGE   = "stockkbot-backend"
