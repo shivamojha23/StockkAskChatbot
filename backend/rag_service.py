@@ -495,10 +495,10 @@ class RAGService:
 
         if not output_result.passed:
             logger.warning(
-                "Output guardrail blocked response.",
-                session_id=session_id,
-                violation_type=str(output_result.violation_type),
-                reason=output_result.reason,
+                "Output guardrail blocked response | session_id=%s | violation_type=%s | reason=%s",
+                session_id,
+                str(output_result.violation_type),
+                output_result.reason,
             )
             yield output_result.safe_response
             return

@@ -26,6 +26,9 @@ pipeline {
     // Environment variables are key-value pairs that can be read by any stage 
     // in the pipeline (like global variables in Python).
     environment {
+        // Expose Docker host via TCP since Jenkins runs as LocalSystem and cannot access the user-level named pipe directly
+        DOCKER_HOST    = "tcp://localhost:2375"
+        
         // Name of our Docker image. We use the Jenkins build number to make it unique.
         DOCKER_IMAGE   = "stockkbot-backend"
         DOCKER_TAG     = "${env.BUILD_NUMBER}"
@@ -141,7 +144,7 @@ pipeline {
                         echo VECTOR_DB=pinecone>> backend\\.env
                         echo PINECONE_INDEX_NAME=stockkask-faq>> backend\\.env
                         echo PINECONE_ENVIRONMENT=us-east-1>> backend\\.env
-                        echo APP_ENV=production>> backend\\.env
+                        echo APP_ENV=development>> backend\\.env
                         echo ALLOWED_ORIGINS=https://stockk.trade,http://localhost:3000,http://127.0.0.1:3000,http://localhost:8000,http://20.2.1.103:3000>> backend\\.env
                         echo LOG_LEVEL=INFO>> backend\\.env
                         echo RATE_LIMIT_PER_MINUTE=20>> backend\\.env
