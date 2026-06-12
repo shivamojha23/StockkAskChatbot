@@ -22,12 +22,16 @@ severity for compliance audit trails.
 """
 
 import re
+import time
 import structlog
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Optional
 
 logger = structlog.get_logger(__name__)
+
+# Timestamp of module import — used by the guardrails health endpoint
+_MODULE_LOAD_TIME = time.time()
 
 
 # ─────────────────────────────────────────────
@@ -46,6 +50,7 @@ class ViolationType(str, Enum):
     TOXICITY = "toxicity"
     PII_INPUT = "pii_input"
     OFF_TOPIC = "off_topic"
+    SESSION_ABUSE = "session_abuse"
     FINANCIAL_ADVICE = "financial_advice_output"
     PROMPT_LEAKAGE = "prompt_leakage_output"
     PII_OUTPUT = "pii_output"
@@ -121,6 +126,7 @@ PII_PATTERNS = {
 # Catch blatantly out-of-scope requests early to save LLM tokens.
 OFF_TOPIC_HARD_PATTERNS = [
     r"\b(write|compose|create|give\s+me)\s+(\w+\s+)?(a\s+)?(poem|song|essay|story|haiku|joke)\b",
+    r"\b(write|generate|create|give\s+me|build)\s+(\w+\s+)?(a\s+)?(code|program|script|function|algorithm)\b",
     r"\b(homework|assignment|thesis|dissertation)\b",
     r"\b(recipe|cook|bake|food)\b",
     r"\b(medical|doctor|diagnos|symptom|medicine|drug\s+dosage)\b",
@@ -159,6 +165,113 @@ LEAKAGE_PATTERNS = [
     r"groq|llama-3|gpt-4o-mini",                         # LLM model names
     r"rag_service|knowledge_base\.py|ingest\.py",        # Internal file names
 ]
+
+
+# ─────────────────────────────────────────────
+# SESSION ABUSE TRACKING
+# ─────────────────────────────────────────────
+
+@dataclass
+class SessionAbuseRecord:
+    """Tracks per-session violation counts for multi-turn abuse detection."""
+    injection_attempts: int = 0
+    toxicity_attempts: int = 0
+    total_violations: int = 0
+    first_violation_time: Optional[float] = None
+    last_violation_time: Optional[float] = None
+
+
+SESSION_ABUSE_TRACKER: dict[str, SessionAbuseRecord] = {}
+_cleanup_call_counter: int = 0
+
+
+def cleanup_old_sessions() -> None:
+    """Remove session records where last_violation_time is more than 3600s ago."""
+    now = time.time()
+    stale_ids = [
+        sid for sid, rec in SESSION_ABUSE_TRACKER.items()
+        if rec.last_violation_time is not None and (now - rec.last_violation_time) > 3600
+    ]
+    for sid in stale_ids:
+        del SESSION_ABUSE_TRACKER[sid]
+    if stale_ids:
+        logger.info("guardrail.session.cleanup", removed_sessions=len(stale_ids))
+
+
+def record_violation(
+    session_id: str,
+    violation_type: ViolationType,
+    severity: Severity,
+) -> None:
+    """Record a guardrail violation against a session for abuse tracking."""
+    global _cleanup_call_counter
+    _cleanup_call_counter += 1
+
+    # Periodic cleanup every 100 calls
+    if _cleanup_call_counter % 100 == 0:
+        cleanup_old_sessions()
+
+    if session_id not in SESSION_ABUSE_TRACKER:
+        SESSION_ABUSE_TRACKER[session_id] = SessionAbuseRecord()
+
+    rec = SESSION_ABUSE_TRACKER[session_id]
+    now = time.time()
+
+    if rec.first_violation_time is None:
+        rec.first_violation_time = now
+    rec.last_violation_time = now
+    rec.total_violations += 1
+
+    if violation_type == ViolationType.PROMPT_INJECTION:
+        rec.injection_attempts += 1
+    elif violation_type == ViolationType.TOXICITY:
+        rec.toxicity_attempts += 1
+
+
+def check_session_abuse(session_id: str) -> GuardrailResult:
+    """
+    Check if a session has exceeded abuse thresholds.
+    Thresholds:
+      - injection_attempts >= 3
+      - toxicity_attempts >= 2
+      - total_violations >= 5
+    """
+    rec = SESSION_ABUSE_TRACKER.get(session_id)
+    if rec is None:
+        return GuardrailResult(passed=True)
+
+    exceeded = (
+        rec.injection_attempts >= 3
+        or rec.toxicity_attempts >= 2
+        or rec.total_violations >= 5
+    )
+
+    if exceeded:
+        logger.error(
+            "guardrail.session.abuse_threshold_exceeded",
+            session_id=session_id,
+            violation_type=ViolationType.SESSION_ABUSE,
+            severity=Severity.CRITICAL,
+            injection_attempts=rec.injection_attempts,
+            toxicity_attempts=rec.toxicity_attempts,
+            total_violations=rec.total_violations,
+        )
+        return GuardrailResult(
+            passed=False,
+            violation_type=ViolationType.PROMPT_INJECTION,
+            severity=Severity.CRITICAL,
+            reason=(
+                f"Session abuse threshold exceeded: "
+                f"injections={rec.injection_attempts}, "
+                f"toxicity={rec.toxicity_attempts}, "
+                f"total={rec.total_violations}"
+            ),
+            safe_response=(
+                "Your session has been flagged for repeated policy violations. "
+                "Please start a new conversation."
+            ),
+        )
+    return GuardrailResult(passed=True)
 
 
 # ─────────────────────────────────────────────
@@ -310,19 +423,37 @@ def run_input_guardrails(message: str, session_id: str) -> GuardrailResult:
     Master input guardrail runner. Runs all input checks in priority order.
     Returns the FIRST failing check, or a passing result with PII-redacted content.
 
+    Guarantees: result.redacted_content is ALWAYS populated (either the
+    PII-cleaned version or the original message unchanged).
+
     Order:
-      1. Prompt injection (CRITICAL — check first, before any processing)
+      0. Session abuse check (blocks repeat offenders before any processing)
+      1. Prompt injection (CRITICAL — check first)
       2. Toxicity
       3. Off-topic (before PII — no point redacting if we're going to block anyway)
       4. PII redaction (passes through, but cleans the message)
     """
+    # 0. Session abuse check — blocks sessions that have exceeded thresholds
+    abuse_result = check_session_abuse(session_id)
+    if not abuse_result.passed:
+        return abuse_result
+
+    # 1-3. Blocking checks
     for check in [check_prompt_injection, check_toxicity, check_off_topic]:
         result = check(message, session_id)
         if not result.passed:
+            # Record the violation for session abuse tracking
+            if result.violation_type:
+                record_violation(session_id, result.violation_type, result.severity or Severity.HIGH)
             return result
 
-    # PII redaction always runs on non-blocked messages
-    return redact_pii(message, session_id)
+    # 4. PII redaction always runs on non-blocked messages
+    pii_result = redact_pii(message, session_id)
+
+    # Guarantee: redacted_content is always populated
+    clean_message = pii_result.redacted_content if pii_result.redacted_content else message
+    pii_result.redacted_content = clean_message
+    return pii_result
 
 
 # ─────────────────────────────────────────────
@@ -407,7 +538,12 @@ def check_pii_in_output(response: str, session_id: str) -> GuardrailResult:
     return GuardrailResult(passed=True)
 
 
-def check_grounding(response: str, context: str, session_id: str) -> GuardrailResult:
+def check_grounding(
+    response: str,
+    context: str,
+    session_id: str,
+    history: str = "",
+) -> GuardrailResult:
     """
     Lightweight grounding check: warn (do not block) if the response makes specific
     numerical claims that are not found in the retrieved context.
@@ -415,16 +551,30 @@ def check_grounding(response: str, context: str, session_id: str) -> GuardrailRe
     This is a heuristic, not a semantic check. For full hallucination detection,
     integrate an NLI (Natural Language Inference) model like cross-encoder/nli-deberta.
 
+    Filtering applied to reduce false positives:
+      - Integers 1-100 (common financial ratio values like PE, ROCE, ROE)
+      - Integers 1900-2030 (years)
+      - Numbers present in conversation history
+
     Currently: Logs a warning for compliance audit. Does not block the response
     to avoid false positives on well-known financial definitions.
     """
     # Extract numbers from response that look like specific stats/metrics
     response_numbers = set(re.findall(r'\b\d{2,}\b', response))
     context_numbers  = set(re.findall(r'\b\d{2,}\b', context))
+    history_numbers  = set(re.findall(r'\b\d{2,}\b', history)) if history else set()
 
-    ungrounded_numbers = response_numbers - context_numbers
-    # Filter out obvious non-facts (years, round numbers, etc.)
-    suspicious = {n for n in ungrounded_numbers if not (1900 <= int(n) <= 2030)}
+    ungrounded_numbers = response_numbers - context_numbers - history_numbers
+
+    # Filter out common financial education values and years
+    suspicious = set()
+    for n in ungrounded_numbers:
+        val = int(n)
+        if 1 <= val <= 100:        # Common ratio values (PE 15, ROCE 18, ROE 22, etc.)
+            continue
+        if 1900 <= val <= 2030:     # Years
+            continue
+        suspicious.add(n)
 
     if len(suspicious) > 3:
         logger.warning(
@@ -472,3 +622,50 @@ def run_output_guardrails(
     check_grounding(response, context, session_id)
 
     return GuardrailResult(passed=True)
+
+
+# ─────────────────────────────────────────────
+# GUARDRAIL HEALTH / STATS
+# ─────────────────────────────────────────────
+
+def get_guardrail_stats() -> dict:
+    """
+    Return guardrail system statistics for the health endpoint.
+    Never exposes message content, matched patterns, or PII.
+    """
+    # Count active sessions and find top violators
+    active_sessions = len(SESSION_ABUSE_TRACKER)
+    top_violators = sorted(
+        SESSION_ABUSE_TRACKER.items(),
+        key=lambda x: x[1].total_violations,
+        reverse=True,
+    )[:3]
+
+    return {
+        "module_loaded_at": time.strftime(
+            "%Y-%m-%dT%H:%M:%SZ", time.gmtime(_MODULE_LOAD_TIME)
+        ),
+        "input_patterns": {
+            "prompt_injection": len(_INJECTION_RE),
+            "toxicity": len(_TOXICITY_RE),
+            "off_topic": len(_OFF_TOPIC_RE),
+            "pii": len(_PII_RE),
+        },
+        "output_patterns": {
+            "sebi_financial_advice": len(_SEBI_RE),
+            "prompt_leakage": len(_LEAKAGE_RE),
+            "pii_output": len(_PII_RE),
+        },
+        "session_abuse_tracker": {
+            "active_sessions": active_sessions,
+            "top_violators": [
+                {
+                    "session_id": sid,
+                    "total_violations": rec.total_violations,
+                    "injection_attempts": rec.injection_attempts,
+                    "toxicity_attempts": rec.toxicity_attempts,
+                }
+                for sid, rec in top_violators
+            ],
+        },
+    }

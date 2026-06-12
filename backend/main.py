@@ -36,7 +36,7 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
 from config import get_settings
-from guardrails import run_input_guardrails
+from guardrails import run_input_guardrails, record_violation, get_guardrail_stats
 from rag_service import get_rag_service
 
 # ---------------------------------------------------------------------------
@@ -249,6 +249,17 @@ async def health_check() -> HealthResponse:
         timestamp=datetime.now(timezone.utc).isoformat(),
         version="1.0.0",
     )
+
+
+@app.get("/api/guardrails/health", tags=["System"])
+async def guardrails_health_check():
+    """
+    Guardrails system stats for ops monitoring.
+    Only available in development / staging environments.
+    """
+    if settings.app_env not in ("development", "staging"):
+        raise HTTPException(status_code=404, detail="Not found")
+    return get_guardrail_stats()
 
 
 @app.get("/api/session/new", response_model=SessionResponse, tags=["Session"])

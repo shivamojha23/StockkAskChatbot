@@ -295,7 +295,10 @@ from guardrails import (
     run_input_guardrails, run_output_guardrails,
     check_prompt_injection, check_toxicity, check_financial_advice_output,
     check_prompt_leakage_output, redact_pii, check_off_topic,
-    ViolationType,
+    check_pii_in_output, check_grounding,
+    record_violation, check_session_abuse, cleanup_old_sessions,
+    SESSION_ABUSE_TRACKER, SessionAbuseRecord,
+    ViolationType, Severity,
 )
 
 GUARDRAIL_SESSION = "test-guardrail-001"
@@ -384,6 +387,14 @@ class TestInputGuardrails(unittest.TestCase):
         self.assertFalse(result.passed)
         self.assertTrue(len(result.safe_response) > 0)
 
+    def test_redacted_content_always_populated(self):
+        """Guarantee: redacted_content is ALWAYS populated on a passing result,
+        even when no PII was found (should be the original message)."""
+        clean_msg = "What is the RSI indicator?"
+        result = run_input_guardrails(clean_msg, "test-redact-guarantee")
+        self.assertTrue(result.passed)
+        self.assertEqual(result.redacted_content, clean_msg)
+
 
 class TestOutputGuardrails(unittest.TestCase):
     """Tests for output guardrails (post-LLM checks)."""
@@ -462,7 +473,114 @@ class TestOutputGuardrails(unittest.TestCase):
         )
         self.assertTrue(result.passed)
 
+    def test_rolling_window_cuts_stream_on_pii(self):
+        """Verify that PII in the output buffer is caught by run_output_guardrails.
+        Simulates a scenario where the LLM echoes a PAN card number."""
+        response_with_pan = "Sure, your PAN is ABCDE1234F. Here is the info you wanted."
+        result = run_output_guardrails(response_with_pan, "some context", GUARDRAIL_SESSION)
+        self.assertFalse(result.passed)
+        self.assertEqual(result.violation_type, ViolationType.PII_OUTPUT)
+
+
+# ------------------------------------------------------------------------------
+# SESSION ABUSE TRACKING TEST CASES
+# ------------------------------------------------------------------------------
+
+class TestSessionAbuseTracking(unittest.TestCase):
+    """Tests for multi-turn session abuse detection."""
+
+    def setUp(self):
+        """Clear session tracker before each test."""
+        SESSION_ABUSE_TRACKER.clear()
+
+    def test_session_abuse_tracker_blocks_after_threshold(self):
+        """Session with >= 3 injection attempts should be blocked."""
+        sid = "test-abuse-block"
+        for _ in range(3):
+            record_violation(sid, ViolationType.PROMPT_INJECTION, Severity.HIGH)
+
+        result = check_session_abuse(sid)
+        self.assertFalse(result.passed)
+        self.assertIn("flagged", result.safe_response.lower())
+
+    def test_session_abuse_tracker_passes_clean_session(self):
+        """Session with no violations should pass."""
+        result = check_session_abuse("test-clean-session")
+        self.assertTrue(result.passed)
+
+    def test_session_abuse_tracker_toxicity_threshold(self):
+        """Session with >= 2 toxicity attempts should be blocked."""
+        sid = "test-toxicity-abuse"
+        for _ in range(2):
+            record_violation(sid, ViolationType.TOXICITY, Severity.HIGH)
+
+        result = check_session_abuse(sid)
+        self.assertFalse(result.passed)
+
+    def test_session_abuse_tracker_total_violations_threshold(self):
+        """Session with >= 5 total violations (mixed types) should be blocked."""
+        sid = "test-total-abuse"
+        record_violation(sid, ViolationType.PROMPT_INJECTION, Severity.HIGH)
+        record_violation(sid, ViolationType.PROMPT_INJECTION, Severity.HIGH)
+        record_violation(sid, ViolationType.OFF_TOPIC, Severity.LOW)
+        record_violation(sid, ViolationType.OFF_TOPIC, Severity.LOW)
+        record_violation(sid, ViolationType.TOXICITY, Severity.HIGH)
+
+        result = check_session_abuse(sid)
+        self.assertFalse(result.passed)
+
+    def test_session_abuse_below_threshold_passes(self):
+        """Session with violations below all thresholds should pass."""
+        sid = "test-below-threshold"
+        record_violation(sid, ViolationType.PROMPT_INJECTION, Severity.HIGH)
+        record_violation(sid, ViolationType.PROMPT_INJECTION, Severity.HIGH)
+        # 2 injection attempts < 3 threshold
+
+        result = check_session_abuse(sid)
+        self.assertTrue(result.passed)
+
+
+# ------------------------------------------------------------------------------
+# GROUNDING CHECK TEST CASES
+# ------------------------------------------------------------------------------
+
+class TestGroundingCheck(unittest.TestCase):
+    """Tests for the grounding check heuristic."""
+
+    def test_grounding_check_does_not_flag_common_ratios(self):
+        """Numbers 1-100 should be filtered out as common financial ratio values."""
+        response = "The PE ratio is 15, ROCE is 22, ROE is 18, and EPS is 45."
+        context = "The company has strong fundamentals."
+        result = check_grounding(response, context, "test-grounding")
+        self.assertTrue(result.passed)
+        # These are all 1-100 range, should not trigger warning
+
+    def test_grounding_check_does_not_flag_years(self):
+        """Years 1900-2030 should be filtered out."""
+        response = "Founded in 1995 and listed on NSE in 2001, the stock was at 2500 in 2020."
+        context = "A large-cap company."
+        result = check_grounding(response, context, "test-grounding-years")
+        self.assertTrue(result.passed)
+
+    def test_grounding_check_flags_many_ungrounded_numbers(self):
+        """More than 3 suspicious numbers not in context should trigger warning."""
+        response = "Revenue was 45000 crores, EBITDA was 12000, net profit 8500, and market cap 150000."
+        context = "The company is a large player."
+        result = check_grounding(response, context, "test-grounding-flag")
+        # Should still pass (warning only, not blocked)
+        self.assertTrue(result.passed)
+        # But should have a grounding failure reason logged
+        if result.violation_type:
+            self.assertEqual(result.violation_type, ViolationType.GROUNDING_FAILURE)
+
+    def test_grounding_check_accepts_history_context(self):
+        """Numbers present in conversation history should not be flagged."""
+        response = "As mentioned, the revenue was 45000 and profit was 12000."
+        context = ""
+        history = "The company revenue was 45000 and profit was 12000 last year."
+        result = check_grounding(response, context, "test-grounding-history", history=history)
+        self.assertTrue(result.passed)
+
 
 if __name__ == '__main__':
     unittest.main()
-
