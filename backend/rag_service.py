@@ -19,6 +19,7 @@ SEBI Compliance:
 """
 
 import logging
+import re
 import time
 from typing import AsyncGenerator
 
@@ -485,50 +486,67 @@ class RAGService:
         except Exception as e:
             logger.debug("Could not retrieve API rate limit headers: %s", e)
 
-        # Buffer-and-check: collect full response, run output guardrails, then yield
-        buffer: list[str] = []
+        # Sliding Sentence Window Stream: buffer tokens until sentence boundary, check, then flush
+        buffer_chars: list[str] = []
+        sentence_boundary = re.compile(r'[.!?\n]')
+        
         t_stream_start = time.perf_counter()
+        t_guardrail_total = 0.0
+        from guardrails import run_output_guardrails
+        
         try:
             async for chunk in stream:
                 delta = chunk.choices[0].delta
                 if delta.content:
-                    buffer.append(delta.content)
+                    buffer_chars.append(delta.content)
+                    current_text = "".join(buffer_chars)
+                    
+                    if sentence_boundary.search(delta.content):
+                        # Sentence complete. Run guardrail check
+                        t_g_start = time.perf_counter()
+                        output_result = run_output_guardrails(current_text, context_text, session_id)
+                        t_guardrail_total += (time.perf_counter() - t_g_start)
+                        
+                        if not output_result.passed:
+                            logger.warning(
+                                "Output guardrail blocked stream | session_id=%s | violation_type=%s",
+                                session_id,
+                                str(output_result.violation_type),
+                            )
+                            yield output_result.safe_response
+                            return
+                            
+                        # Passed check, flush to user
+                        yield current_text
+                        buffer_chars.clear()
+                        
         except Exception as exc:
             logger.error("LLM streaming error during chunk generation: %s", exc)
             yield "\n\n⚠️ Sorry, I encountered an error. Please try again shortly."
             return
 
-        t_stream = time.perf_counter() - t_stream_start
-        full_response = "".join(buffer)
+        # Flush any remaining partial sentence
+        if buffer_chars:
+            current_text = "".join(buffer_chars)
+            t_g_start = time.perf_counter()
+            output_result = run_output_guardrails(current_text, context_text, session_id)
+            t_guardrail_total += (time.perf_counter() - t_g_start)
+            
+            if not output_result.passed:
+                yield output_result.safe_response
+                return
+            yield current_text
 
-        # Run output guardrails on the complete response
-        t_guardrail_start = time.perf_counter()
-        from guardrails import run_output_guardrails
-        output_result = run_output_guardrails(full_response, context_text, session_id)
-        t_guardrail = time.perf_counter() - t_guardrail_start
+        t_stream = time.perf_counter() - t_stream_start
 
         logger.info(
-            "Latency Breakdown | session_id=%s | retrieve_ms=%d | llm_stream_ms=%d | out_guardrail_ms=%d | total_rag_ms=%d",
+            "Latency Breakdown | session_id=%s | retrieve_ms=%d | llm_stream_ms=%d | out_guardrail_total_ms=%d | total_rag_ms=%d",
             session_id,
             int(t_retrieve * 1000),
             int(t_stream * 1000),
-            int(t_guardrail * 1000),
+            int(t_guardrail_total * 1000),
             int((time.perf_counter() - t_start) * 1000),
         )
-
-        if not output_result.passed:
-            logger.warning(
-                "Output guardrail blocked response | session_id=%s | violation_type=%s | reason=%s",
-                session_id,
-                str(output_result.violation_type),
-                output_result.reason,
-            )
-            yield output_result.safe_response
-            return
-
-        # Response passed all checks — yield buffered tokens
-        for token in buffer:
-            yield token
 
     # ------------------------------------------------------------------
     # Non-streaming (for health checks / testing)

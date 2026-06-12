@@ -88,7 +88,8 @@ class PineconeVectorStore(VectorStore):
     def __init__(self) -> None:
         settings = get_settings()
         try:
-            from pinecone import Pinecone
+            import asyncio
+            from pinecone.grpc import PineconeGRPC as Pinecone
             pc = Pinecone(api_key=settings.pinecone_api_key)
             self._index = pc.Index(settings.pinecone_index_name)
             logger.info("Pinecone index '%s' connected.", settings.pinecone_index_name)
@@ -98,6 +99,7 @@ class PineconeVectorStore(VectorStore):
 
     async def upsert(self, records: list[VectorRecord]) -> int:
         """Batch upsert to Pinecone in chunks of 100 (API limit)."""
+        import asyncio
         BATCH_SIZE = 100
         total = 0
         for i in range(0, len(records), BATCH_SIZE):
@@ -106,7 +108,7 @@ class PineconeVectorStore(VectorStore):
                 {"id": r.id, "values": r.vector, "metadata": r.metadata}
                 for r in batch
             ]
-            self._index.upsert(vectors=vectors)
+            await asyncio.to_thread(self._index.upsert, vectors=vectors)
             total += len(batch)
             logger.debug("Upserted batch %d/%d", i + BATCH_SIZE, len(records))
         return total
@@ -125,7 +127,8 @@ class PineconeVectorStore(VectorStore):
         if filter_metadata:
             kwargs["filter"] = filter_metadata
 
-        response = self._index.query(**kwargs)
+        import asyncio
+        response = await asyncio.to_thread(self._index.query, **kwargs)
         return [
             SearchResult(
                 id=match["id"],
@@ -136,7 +139,8 @@ class PineconeVectorStore(VectorStore):
         ]
 
     async def delete_all(self) -> None:
-        self._index.delete(delete_all=True)
+        import asyncio
+        await asyncio.to_thread(self._index.delete, delete_all=True)
         logger.warning("All vectors deleted from Pinecone index.")
 
 

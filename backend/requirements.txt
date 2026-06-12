@@ -16,7 +16,7 @@ slowapi==0.1.9
 openai==1.30.5
 
 # --- Vector Database ---
-pinecone-client==4.1.0       # Pinecone
+pinecone-client[grpc]==4.1.0       # Pinecone
 # qdrant-client==1.9.1       # Uncomment for Qdrant
 
 # --- HTTP & Web Crawling ---

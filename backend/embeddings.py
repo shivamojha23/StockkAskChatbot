@@ -53,10 +53,12 @@ class EmbeddingService:
         Used for query embedding during RAG retrieval.
         """
         if self._provider == "fastembed":
-            # fastembed is synchronous but very fast, so we can wrap it or call it directly.
-            # Using list(self._model.embed([text])) returns a generator of numpy arrays.
-            embeddings = list(self._model.embed([text]))
-            return embeddings[0].tolist()
+            import asyncio
+            # Offload CPU-bound fastembed inference to a background thread
+            def _embed():
+                embeddings = list(self._model.embed([text]))
+                return embeddings[0].tolist()
+            return await asyncio.to_thread(_embed)
         
         elif self._provider == "openai":
             from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
@@ -84,8 +86,11 @@ class EmbeddingService:
         Used during knowledge base ingestion.
         """
         if self._provider == "fastembed":
-            embeddings = list(self._model.embed(texts))
-            return [e.tolist() for e in embeddings]
+            import asyncio
+            def _embed_batch():
+                embeddings = list(self._model.embed(texts))
+                return [e.tolist() for e in embeddings]
+            return await asyncio.to_thread(_embed_batch)
             
         elif self._provider == "openai":
             from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
