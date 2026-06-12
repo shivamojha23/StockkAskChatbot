@@ -22,7 +22,7 @@ Run:
 
 import asyncio
 import json
-import logging
+import time
 import uuid
 from datetime import datetime, timezone
 
@@ -199,6 +199,8 @@ async def sse_event_generator(
     session_id: str,
     message: str,
     history: list[dict],
+    t_start: float = 0.0,
+    t_input_guardrail: float = 0.0,
 ) -> str:
     """
     Yields Server-Sent Events (SSE) formatted chunks.
@@ -209,9 +211,20 @@ async def sse_event_generator(
     """
     rag = get_rag_service()
     full_response: list[str] = []
+    first_token = True
 
     try:
         async for token in rag.generate_stream(message, history, session_id=session_id):
+            if first_token and t_start > 0:
+                tft = time.perf_counter() - t_start
+                logger.info(
+                    "TFT (Time to First Token) measured", 
+                    session_id=session_id, 
+                    tft_ms=int(tft * 1000), 
+                    in_guardrail_ms=int(t_input_guardrail * 1000)
+                )
+                first_token = False
+
             if await request.is_disconnected():
                 logger.info("Client disconnected mid-stream.", session_id=session_id)
                 break
@@ -221,10 +234,13 @@ async def sse_event_generator(
 
         # Signal stream end
         yield "data: [DONE]\n\n"
+        
+        t_total = time.perf_counter() - t_start if t_start > 0 else 0
         logger.info(
             "Stream complete.",
             session_id=session_id,
             response_chars=sum(len(t) for t in full_response),
+            total_latency_ms=int(t_total * 1000),
         )
 
     except Exception as exc:
@@ -297,7 +313,9 @@ async def chat(
     )
 
     # ── INPUT GUARDRAILS ─────────────────────────────────
+    t_start = time.perf_counter()
     input_result = run_input_guardrails(body.message, body.session_id)
+    t_input_guardrail = time.perf_counter() - t_start
 
     if not input_result.passed:
         # Stream the safe response as SSE for frontend compatibility
@@ -328,6 +346,8 @@ async def chat(
             session_id=body.session_id,
             message=clean_message,
             history=history_dicts,
+            t_start=t_start,
+            t_input_guardrail=t_input_guardrail,
         ),
         media_type="text/event-stream",
         headers={

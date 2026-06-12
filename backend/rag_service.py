@@ -19,6 +19,7 @@ SEBI Compliance:
 """
 
 import logging
+import time
 from typing import AsyncGenerator
 
 import tiktoken
@@ -388,7 +389,9 @@ class RAGService:
             str: Token-by-token text chunks from the LLM.
         """
         # Step 1: Retrieve context
+        t_start = time.perf_counter()
         context_text, raw_results = await self.retrieve_context(user_message)
+        t_retrieve = time.perf_counter() - t_start
 
         # Step 2: Build system prompt with injected context
         system_prompt = SYSTEM_PROMPT_TEMPLATE.format(context=context_text)
@@ -484,6 +487,7 @@ class RAGService:
 
         # Buffer-and-check: collect full response, run output guardrails, then yield
         buffer: list[str] = []
+        t_stream_start = time.perf_counter()
         try:
             async for chunk in stream:
                 delta = chunk.choices[0].delta
@@ -494,11 +498,23 @@ class RAGService:
             yield "\n\n⚠️ Sorry, I encountered an error. Please try again shortly."
             return
 
+        t_stream = time.perf_counter() - t_stream_start
         full_response = "".join(buffer)
 
         # Run output guardrails on the complete response
+        t_guardrail_start = time.perf_counter()
         from guardrails import run_output_guardrails
         output_result = run_output_guardrails(full_response, context_text, session_id)
+        t_guardrail = time.perf_counter() - t_guardrail_start
+
+        logger.info(
+            "Latency Breakdown | session_id=%s | retrieve_ms=%d | llm_stream_ms=%d | out_guardrail_ms=%d | total_rag_ms=%d",
+            session_id,
+            int(t_retrieve * 1000),
+            int(t_stream * 1000),
+            int(t_guardrail * 1000),
+            int((time.perf_counter() - t_start) * 1000),
+        )
 
         if not output_result.passed:
             logger.warning(
