@@ -29,7 +29,12 @@ class EmbeddingService:
             logger.info("Initialising OpenAI Embeddings with model '%s'...", settings.embedding_model)
             import tiktoken
             from openai import AsyncOpenAI
-            self._client = AsyncOpenAI(api_key=settings.openai_api_key)
+            openai_key = (
+                settings.openai_api_key.get_secret_value()
+                if hasattr(settings.openai_api_key, "get_secret_value")
+                else settings.openai_api_key
+            )
+            self._client = AsyncOpenAI(api_key=openai_key)
             self._model_name = settings.embedding_model
             self._encoder = tiktoken.get_encoding("cl100k_base")
             self.MAX_TOKENS_PER_CHUNK = 8191

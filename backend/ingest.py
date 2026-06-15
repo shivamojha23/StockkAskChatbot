@@ -231,6 +231,19 @@ async def run_ingestion(
     # 7. Build VectorRecord list
     records: list[VectorRecord] = []
     for entry, vector in zip(entries, all_embeddings):
+        # Store only a short, sanitized excerpt in metadata to minimise the risk
+        # of leaking full document text or internal identifiers when context is
+        # retrieved for prompt injection. Full documents remain in the source
+        # knowledge files (knowledge_base.py) and are not required at runtime.
+        raw_content = entry.get("content", "")
+        # Truncate to a safe excerpt length
+        EXCERPT_LEN = 400
+        excerpt = raw_content[:EXCERPT_LEN].rsplit(" ", 1)[0]
+        # Redact simple doc-id patterns and URLs from metadata
+        import re
+        excerpt = re.sub(r"\b[a-z]+-\d+\b", "[REDACTED_ID]", excerpt, flags=re.IGNORECASE)
+        excerpt = re.sub(r"https?://[^\s]+", "[REDACTED_URL]", excerpt)
+
         records.append(
             VectorRecord(
                 id=entry["id"],
@@ -238,8 +251,8 @@ async def run_ingestion(
                 metadata={
                     "category": entry["category"],
                     "title": entry["title"],
-                    "content": entry["content"],  # Stored for prompt injection
-                    "source_url": "https://stockk.trade/stockkask/",
+                    "excerpt": excerpt,
+                    "source": "StockkAsk Knowledge Base",
                 },
             )
         )

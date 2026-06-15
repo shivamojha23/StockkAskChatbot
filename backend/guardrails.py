@@ -609,6 +609,7 @@ def run_output_guardrails(
       3. PII in output (privacy risk)
       4. Grounding check (quality warning — does not block)
     """
+    # Core blocking checks (order matters: SEBI violations highest risk)
     for check_fn, args in [
         (check_financial_advice_output, (response, session_id)),
         (check_prompt_leakage_output,   (response, session_id)),
@@ -617,6 +618,46 @@ def run_output_guardrails(
         result = check_fn(*args)
         if not result.passed:
             return result
+
+    # Additional defensive filter: block obvious internal/exfiltration keywords
+    # This list complements the regex-based LEAKAGE_PATTERNS by catching
+    # simple, user-specified substrings that may not be covered by complex
+    # regex rules. Added to satisfy an explicit output-filter requirement.
+    def _check_forbidden_words(text: str) -> GuardrailResult:
+        forbidden = [
+            "system prompt",
+            "retrieved document",
+            "vector database",
+            "source file",
+            "my instructions",
+            "internal",
+            "confidential",
+            "config",
+            "pipeline",
+        ]
+        low = text.lower()
+        for word in forbidden:
+            if word in low:
+                logger.error(
+                    "guardrail.output.forbidden_word_detected",
+                    session_id=session_id,
+                    matched_word=word,
+                )
+                return GuardrailResult(
+                    passed=False,
+                    violation_type=ViolationType.PROMPT_LEAKAGE,
+                    severity=Severity.CRITICAL,
+                    reason=f"Forbidden substring detected in output: {word}",
+                    safe_response=(
+                        "I'm not able to share internal configuration or retrieved "
+                        "documents. How can I help you with StockkAsk today?"
+                    ),
+                )
+        return GuardrailResult(passed=True)
+
+    forbidden_check = _check_forbidden_words(response)
+    if not forbidden_check.passed:
+        return forbidden_check
 
     # Grounding check — non-blocking, logs warning only
     check_grounding(response, context, session_id)

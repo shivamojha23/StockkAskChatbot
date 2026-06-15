@@ -86,7 +86,22 @@ app = FastAPI(
     version="1.0.0",
     docs_url="/docs" if settings.app_env == "development" else None,
     redoc_url="/redoc" if settings.app_env == "development" else None,
+    openapi_url="/openapi.json" if settings.app_env == "development" else None,
 )
+
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "same-origin")
+    response.headers.setdefault("Permissions-Policy", "interest-cohort=()")
+    if settings.app_env == "production":
+        response.headers.setdefault(
+            "Strict-Transport-Security",
+            "max-age=63072000; includeSubDomains; preload",
+        )
+    return response
 
 # --- Rate limit error handler ---
 app.state.limiter = limiter
@@ -105,7 +120,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
     allow_origin_regex=cors_regex,
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["Content-Type", "X-Session-ID"],
     max_age=600,
@@ -338,7 +353,22 @@ async def chat(
     clean_message = input_result.redacted_content or body.message
 
     # Convert Pydantic models to plain dicts for the RAG service
-    history_dicts = [{"role": m.role, "content": m.content} for m in body.history]
+    # Run input guardrails on each history entry to prevent prompt-injection
+    # or PII from being re-introduced via conversation history.
+    history_dicts: list[dict] = []
+    for m in body.history:
+        try:
+            hist_check = run_input_guardrails(m.content, body.session_id)
+        except Exception:
+            # If guardrail system fails unexpectedly, fall back to raw content
+            history_dicts.append({"role": m.role, "content": m.content})
+            continue
+
+        if not hist_check.passed:
+            # Replace offending history content with a safe, non-sensitive message.
+            history_dicts.append({"role": m.role, "content": hist_check.safe_response})
+        else:
+            history_dicts.append({"role": m.role, "content": hist_check.redacted_content or m.content})
 
     return StreamingResponse(
         sse_event_generator(
@@ -390,4 +420,5 @@ if __name__ == "__main__":
         port=8000,
         reload=settings.app_env == "development",
         log_level=settings.log_level.lower(),
+        server_header=False,
     )

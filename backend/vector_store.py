@@ -90,7 +90,12 @@ class PineconeVectorStore(VectorStore):
         try:
             import asyncio
             from pinecone.grpc import PineconeGRPC as Pinecone
-            pc = Pinecone(api_key=settings.pinecone_api_key)
+            pinecone_key = (
+                settings.pinecone_api_key.get_secret_value()
+                if hasattr(settings.pinecone_api_key, "get_secret_value")
+                else settings.pinecone_api_key
+            )
+            pc = Pinecone(api_key=pinecone_key)
             self._index = pc.Index(settings.pinecone_index_name)
             logger.info("Pinecone index '%s' connected.", settings.pinecone_index_name)
         except Exception as exc:
@@ -162,9 +167,14 @@ class QdrantVectorStore(VectorStore):
             from qdrant_client import AsyncQdrantClient
             from qdrant_client.models import Distance, VectorParams
 
+            qdrant_key = (
+                settings.qdrant_api_key.get_secret_value()
+                if hasattr(settings.qdrant_api_key, "get_secret_value")
+                else settings.qdrant_api_key
+            )
             self._client = AsyncQdrantClient(
                 url=settings.qdrant_url,
-                api_key=settings.qdrant_api_key or None,
+                api_key=qdrant_key or None,
             )
             self._collection = settings.qdrant_collection
             logger.info("Qdrant collection '%s' connected.", self._collection)
