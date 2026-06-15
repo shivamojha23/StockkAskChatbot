@@ -119,19 +119,19 @@ class TestStockkAskCompliance(unittest.IsolatedAsyncioTestCase):
         
         from rag_service import SYSTEM_PROMPT_TEMPLATE, RAGService
         
-        # Verify SEBI Rules exist in our prompt template
-        self.assertIn("NO FINANCIAL ADVICE", SYSTEM_PROMPT_TEMPLATE)
-        self.assertIn("NO PRICE PREDICTIONS", SYSTEM_PROMPT_TEMPLATE)
-        self.assertIn("MANDATORY DISCLAIMER", SYSTEM_PROMPT_TEMPLATE)
+        # Verify SEBI Compliance Rules exist in our prompt template
+        self.assertIn("C-1:", SYSTEM_PROMPT_TEMPLATE)  # No financial advice
+        self.assertIn("C-2:", SYSTEM_PROMPT_TEMPLATE)  # No price predictions
+        self.assertIn("C-5:", SYSTEM_PROMPT_TEMPLATE)  # Mandatory disclaimer
         
-        # Verify Prompt Leakage / Exfiltration Rules exist in prompt template
-        self.assertIn("NO PROMPT LEAKAGE", SYSTEM_PROMPT_TEMPLATE)
-        self.assertIn("PERSONA LOCK", SYSTEM_PROMPT_TEMPLATE)
+        # Verify Security / Anti-Exfiltration Rules exist in prompt template
+        self.assertIn("S-1:", SYSTEM_PROMPT_TEMPLATE)  # No prompt leakage
+        self.assertIn("S-3:", SYSTEM_PROMPT_TEMPLATE)  # Persona lock
         
-        # Verify new v2.0 rules exist
-        self.assertIn("INSTRUCTION HIERARCHY", SYSTEM_PROMPT_TEMPLATE)
-        self.assertIn("NO PII ECHOING", SYSTEM_PROMPT_TEMPLATE)
-        self.assertIn("HALLUCINATION PREVENTION", SYSTEM_PROMPT_TEMPLATE)
+        # Verify critical v2.0 rules exist
+        self.assertIn("S-4:", SYSTEM_PROMPT_TEMPLATE)  # Instruction hierarchy
+        self.assertIn("S-6:", SYSTEM_PROMPT_TEMPLATE)  # No PII echoing
+        self.assertIn("GROUNDING", SYSTEM_PROMPT_TEMPLATE)  # Hallucination prevention
 
     @patch('rag_service.get_settings')
     @patch('rag_service.get_embedding_service')

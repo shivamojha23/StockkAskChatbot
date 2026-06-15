@@ -42,7 +42,7 @@ class Settings(BaseSettings):
     qdrant_collection: str = "stockkask-faq"
 
     # --- Which vector DB to use ---
-    vector_db: Literal["pinecone", "qdrant"] = "pinecone"
+    vector_db: Literal["pinecone", "qdrant", "faiss"] = "pinecone"
 
     # --- App ---
     app_env: Literal["development", "production"] = "development"

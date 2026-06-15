@@ -236,6 +236,141 @@ class QdrantVectorStore(VectorStore):
 
 
 # ---------------------------------------------------------------------------
+# FAISS Implementation (Local In-Memory)
+# ---------------------------------------------------------------------------
+
+class FAISSVectorStore(VectorStore):
+    """
+    FAISS implementation of VectorStore — ultra-low-latency local search.
+
+    Uses faiss-cpu for in-memory cosine similarity search.
+    Persists index + metadata to disk so it survives server restarts.
+    For small KBs (< 10K vectors), search takes < 1ms.
+    """
+
+    INDEX_DIR = "faiss_index"
+    INDEX_FILE = "index.faiss"
+    META_FILE = "metadata.json"
+
+    def __init__(self) -> None:
+        import json
+        import os
+
+        import faiss
+        import numpy as np
+
+        self._faiss = faiss
+        self._np = np
+        self._json = json
+        self._os = os
+
+        self._index_path = os.path.join(self.INDEX_DIR, self.INDEX_FILE)
+        self._meta_path = os.path.join(self.INDEX_DIR, self.META_FILE)
+
+        # Try to load persisted index from disk
+        if os.path.exists(self._index_path) and os.path.exists(self._meta_path):
+            self._index = faiss.read_index(self._index_path)
+            with open(self._meta_path, "r", encoding="utf-8") as f:
+                self._metadata: dict[str, dict[str, Any]] = json.load(f)
+            self._id_list: list[str] = list(self._metadata.keys())
+            logger.info(
+                "FAISS index loaded from disk. %d vectors ready.",
+                self._index.ntotal,
+            )
+        else:
+            self._index = None
+            self._metadata = {}
+            self._id_list = []
+            logger.info("FAISS index not found on disk. Will be created on first upsert.")
+
+    def _save_to_disk(self) -> None:
+        """Persist the FAISS index and metadata to disk."""
+        self._os.makedirs(self.INDEX_DIR, exist_ok=True)
+        self._faiss.write_index(self._index, self._index_path)
+        with open(self._meta_path, "w", encoding="utf-8") as f:
+            self._json.dump(self._metadata, f, ensure_ascii=False)
+        logger.debug("FAISS index saved to disk (%d vectors).", self._index.ntotal)
+
+    async def upsert(self, records: list[VectorRecord]) -> int:
+        if not records:
+            return 0
+
+        dim = len(records[0].vector)
+
+        # Create index if it doesn't exist yet
+        if self._index is None:
+            # Use IndexFlatIP (inner product) with normalized vectors = cosine similarity
+            self._index = self._faiss.IndexFlatIP(dim)
+            logger.info("Created new FAISS IndexFlatIP with dimension %d.", dim)
+
+        # Build numpy array of vectors and normalize for cosine similarity
+        vectors = self._np.array(
+            [r.vector for r in records], dtype=self._np.float32
+        )
+        self._faiss.normalize_L2(vectors)
+
+        # Add to index
+        self._index.add(vectors)
+
+        # Store metadata keyed by record ID
+        for r in records:
+            self._metadata[r.id] = r.metadata
+            self._id_list.append(r.id)
+
+        # Persist to disk
+        self._save_to_disk()
+
+        logger.info("FAISS upserted %d vectors (total: %d).", len(records), self._index.ntotal)
+        return len(records)
+
+    async def query(
+        self,
+        vector: list[float],
+        top_k: int = 5,
+        filter_metadata: dict[str, Any] | None = None,
+    ) -> list[SearchResult]:
+        if self._index is None or self._index.ntotal == 0:
+            logger.warning("FAISS index is empty. Returning no results.")
+            return []
+
+        # Normalize query vector for cosine similarity
+        query_vec = self._np.array([vector], dtype=self._np.float32)
+        self._faiss.normalize_L2(query_vec)
+
+        # Search
+        k = min(top_k, self._index.ntotal)
+        scores, indices = self._index.search(query_vec, k)
+
+        results: list[SearchResult] = []
+        for score, idx in zip(scores[0], indices[0]):
+            if idx < 0 or idx >= len(self._id_list):
+                continue
+            record_id = self._id_list[idx]
+            meta = self._metadata.get(record_id, {})
+
+            # Apply metadata filter if provided
+            if filter_metadata:
+                if not all(meta.get(fk) == fv for fk, fv in filter_metadata.items()):
+                    continue
+
+            results.append(
+                SearchResult(id=record_id, score=float(score), metadata=meta)
+            )
+
+        return results
+
+    async def delete_all(self) -> None:
+        import shutil
+
+        self._index = None
+        self._metadata = {}
+        self._id_list = []
+        if self._os.path.exists(self.INDEX_DIR):
+            shutil.rmtree(self.INDEX_DIR)
+        logger.warning("FAISS index deleted.")
+
+
+# ---------------------------------------------------------------------------
 # Factory Function
 # ---------------------------------------------------------------------------
 
@@ -250,5 +385,8 @@ def get_vector_store() -> VectorStore:
         return PineconeVectorStore()
     elif settings.vector_db == "qdrant":
         return QdrantVectorStore()
+    elif settings.vector_db == "faiss":
+        return FAISSVectorStore()
     else:
         raise ValueError(f"Unknown vector_db config: '{settings.vector_db}'")
+
