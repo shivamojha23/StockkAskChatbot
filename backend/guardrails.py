@@ -96,6 +96,11 @@ INJECTION_PATTERNS = [
     r"(print|output|show|reveal|display|repeat|list|write|tell\s+me)\s+(your\s+)?(system\s+prompt|instructions?|rules?|prompt|constraints?)",
     r"what\s+(are\s+)?(your\s+)?(instructions?|rules?|system\s+prompt|constraints?)",
     r"(translate|encode|decode|convert|repeat)\s+(your\s+)?(system\s+prompt|instructions?|rules?)",
+    # Direct questions about retrieval or internal prompts
+    r"what\s+is\s+(the\s+)?prompt\s+(for\s+)?(context|context\s+retrieval|retrieval)\b",
+    r"what\s+is\s+(your\s+)?(context\s+retrieval|retrieval)\s+prompt\b",
+    r"how\s+do\s+you\s+(retrieve|fetch)\s+context\b",
+    r"prompt\s+for\s+(context|retrieval)\b",
     # Encoding obfuscation (used to extract restricted content)
     r"(in\s+)?(base64|rot13|morse\s+code|hex|binary)\s*(encode|decode|format|output|answer)",
 ]
@@ -315,6 +320,26 @@ def check_prompt_injection(message: str, session_id: str) -> GuardrailResult:
             matched_pattern=matched,
             message_snippet=message[:120],
         )
+        # If the user explicitly asks about internal prompts, provide a
+        # safe, public-facing explanation instead of revealing internal text.
+        low = message.lower()
+        if any(k in low for k in ("prompt", "context", "retrieve", "retrieval")):
+            public_explain = (
+                "I can't disclose internal prompts or retrieved documents. "
+                "Publicly, I follow a simple process: 1) I read your question; "
+                "2) I find relevant platform documentation; 3) I use that "
+                "information to create a concise, educational answer; "
+                "4) I apply safety filters to avoid giving investment advice. "
+                "How can I help you about StockkAsk today?"
+            )
+            return GuardrailResult(
+                passed=False,
+                violation_type=ViolationType.PROMPT_INJECTION,
+                severity=Severity.HIGH,
+                reason=f"Prompt information request detected: {matched}",
+                safe_response=public_explain,
+            )
+
         return GuardrailResult(
             passed=False,
             violation_type=ViolationType.PROMPT_INJECTION,
