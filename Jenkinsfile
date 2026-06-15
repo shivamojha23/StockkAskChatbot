@@ -141,7 +141,7 @@ pipeline {
                         echo PINECONE_API_KEY=${PINECONE_API_KEY}>> backend\\.env
                         echo LLM_PROVIDER=groq>> backend\\.env
                         echo EMBEDDING_PROVIDER=fastembed>> backend\\.env
-                        echo VECTOR_DB=pinecone>> backend\\.env
+                        echo VECTOR_DB=faiss>> backend\\.env
                         echo PINECONE_INDEX_NAME=stockkask-faq>> backend\\.env
                         echo PINECONE_ENVIRONMENT=us-east-1>> backend\\.env
                         echo APP_ENV=development>> backend\\.env
@@ -151,8 +151,8 @@ pipeline {
                         echo RATE_LIMIT_PER_DAY=500>> backend\\.env
                         echo EMBEDDING_MODEL=BAAI/bge-small-en-v1.5>> backend\\.env
                         echo CHAT_MODEL=llama-3.1-8b-instant>> backend\\.env
-                        echo TOP_K_RESULTS=5>> backend\\.env
-                        echo MAX_CONTEXT_TOKENS=2000>> backend\\.env
+                        echo TOP_K_RESULTS=3>> backend\\.env
+                        echo MAX_CONTEXT_TOKENS=800>> backend\\.env
                     """
                 }
                 
