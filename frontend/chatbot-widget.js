@@ -699,7 +699,8 @@
 
       try {
         // Build history for API (exclude the current message we just pushed)
-        const historyForApi = this._messages.slice(0, -1);
+        // Trim to maxHistoryLength to stay within the backend's validation limit
+        const historyForApi = this._messages.slice(0, -1).slice(-this._config.maxHistoryLength);
 
         const response = await ApiClient.sendMessage(
           this._config.apiUrl,
