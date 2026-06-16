@@ -133,7 +133,7 @@ class TestStockkAskCompliance(unittest.IsolatedAsyncioTestCase):
         self.assertIn("S-5:", SYSTEM_PROMPT_TEMPLATE)  # Anti-translation rule
         self.assertIn("S-6:", SYSTEM_PROMPT_TEMPLATE)  # No PII echoing
         self.assertIn("S-7:", SYSTEM_PROMPT_TEMPLATE)  # Anti-meta-analysis rule
-        self.assertIn("S-8:", SYSTEM_PROMPT_TEMPLATE)  # Defense against formatting/translating instructions
+        self.assertIn("S-8 (CRITICAL SAFETY DIRECTIVE):", SYSTEM_PROMPT_TEMPLATE)  # Defense against formatting/translating instructions
         self.assertIn("GROUNDING", SYSTEM_PROMPT_TEMPLATE)  # Hallucination prevention
         self.assertIn("CANARY", SYSTEM_PROMPT_TEMPLATE)  # Canary token embedded
 
