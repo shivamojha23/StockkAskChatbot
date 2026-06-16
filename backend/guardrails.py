@@ -156,9 +156,10 @@ INJECTION_PATTERNS = [
     # ── VULN-2 FIX: Meta-analysis / process probes ────────────────────────
     # "walk me through your process", "explain your execution flow step by step"
     r"(walk|step)\s+(me\s+)?(through|by\s+step)\s+(your\s+)?(internal\s+)?(process|flow|logic|pipeline|reasoning|execution|decision\s+making)",
-    r"(explain|describe|outline|detail|document|list)\s+(your\s+)?(internal\s+)?(execution|decision|reasoning|processing)\s+(flow|process|steps?|pipeline|logic)",
-    r"(what|how|describe|explain)\s+(is|are|does)\s+(your\s+)?(internal\s+)?(process|flow|pipeline|logic|steps?)\s+(for|to|when)\s+(answer|respond|process|generat)",
-    r"(what|which)\s+(exact\s+)?(steps?|process|flow|logic|rules?)\s+(do\s+you|does\s+the\s+(system|bot|ai))\s+follow\s+(to|when|for)\s+(answer|respond|generat|process)",
+    r"(explain|describe|outline|detail|document|list)\s+(your\s+)?(internal\s+)?(execution|decision|reasoning|processing)\s+(flow|process|steps?|pipeline|logic|methodology|strategy)",
+    r"(what|how|describe|explain)\s+(is|are|does|do)\s+(your|you|the)\s+(internal\s+)?(process|flow|pipeline|logic|steps?|methodology|strategy|workflow)\s+(for|to|when|employ\s+to|use\s+to)\s+(answer|respond|process|generat|resolv)",
+    r"(what|which)\s+(exact\s+)?(steps?|process|flow|logic|rules?|methodolog(y|ies)|strateg(y|ies))\s+(do\s+you|does\s+the\s+(system|bot|ai))\s+(follow|employ|use|apply|utilize)\s+(to|when|for)\s+(answer|respond|generat|process|resolv)",
+    r"what\s+methodology\s+do\s+you\s+(employ|use)\s+to\s+(resolve|answer)\s+",
     # "output the exact system text" / "show me the exact text of your rules"
     r"(output|print|show|display|give|provide|write)\s+(the\s+)?(exact|full|complete|entire|raw|original|verbatim)\s+(system\s+)?(text|content|wording|prompt|instructions?|rules?)",
 
